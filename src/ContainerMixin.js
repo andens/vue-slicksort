@@ -35,6 +35,7 @@ export const ContainerMixin = {
     lockToContainerEdges:       { type: Boolean, default: false },
     lockOffset:                 { type: [String, Number, Array], default: '50%' },
     transitionDuration:         { type: Number,  default: 300 },
+    appendHelperToContainer:    { type: Boolean, default: false },
     lockAxis: String,
     helperClass: String,
     contentWindow: Object,
@@ -242,7 +243,11 @@ export const ContainerMixin = {
           }
         });
 
-        this.helper = this.document.body.appendChild(clonedNode);
+        if (this.appendHelperToContainer === true) {
+          this.helper = this.container.appendChild(clonedNode);
+        } else {
+          this.helper = this.document.body.appendChild(clonedNode);
+        }
 
         this.helper.style.position = 'fixed';
         this.helper.style.top = `${this.boundingClientRect.top - margin.top}px`;
