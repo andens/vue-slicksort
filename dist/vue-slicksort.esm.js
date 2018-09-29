@@ -324,7 +324,10 @@ var ContainerMixin = {
         start: this.handleStart,
         move: this.handleMove,
         end: this.handleEnd
-      }
+      },
+      // Tracker data used by the `updated` lifecycle hook to transition the
+      // dragged item into place when sorting ends.
+      lastSortEndEventParams: null
     };
   },
 
@@ -341,6 +344,8 @@ var ContainerMixin = {
     lockToContainerEdges: { type: Boolean, default: false },
     lockOffset: { type: [String, Number, Array], default: '50%' },
     transitionDuration: { type: Number, default: 300 },
+    draggedSettlingDuration: { type: Number, default: 300 },
+    appendHelperToContainer: { type: Boolean, default: false },
     lockAxis: String,
     helperClass: String,
     contentWindow: Object,
@@ -389,13 +394,56 @@ var ContainerMixin = {
       _loop(key);
     }
   },
-  beforeDestroy: function beforeDestroy() {
+  updated: function updated() {
     var _this2 = this;
 
+    this.$nextTick(function () {
+      // Transition the dragged item into place
+      if (_this2.lastSortEndEventParams && _this2.$props.draggedSettlingDuration) {
+        // If draggable items are added with v-for, Vue either rearranges or
+        // patches DOM nodes in place according to the key. The sortableInfo
+        // index is consulted to know which node to translate.
+        var nodes = _this2.manager.refs[_this2.lastSortEndEventParams.collection];
+        var oldIndexNode = nodes[_this2.lastSortEndEventParams.oldIndex].node;
+        var el = null;
+        if (oldIndexNode.sortableInfo.index === _this2.lastSortEndEventParams.newIndex) {
+          el = oldIndexNode;
+        } else {
+          el = nodes[_this2.lastSortEndEventParams.newIndex].node;
+        }
+
+        // The dragged item begins where the helper ended
+        el.style[vendorPrefix + 'Transform'] = 'translate3d(' + _this2.lastSortEndEventParams.translate.x + 'px,' + _this2.lastSortEndEventParams.translate.y + 'px, 0)';
+
+        // Force browser recalculation to reset transition
+        el.getBoundingClientRect();
+
+        // Transition into place
+        el.style[vendorPrefix + 'Transform'] = 'translate3d(0, 0, 0)';
+        el.style[vendorPrefix + 'TransitionDuration'] = _this2.$props.draggedSettlingDuration + 'ms';
+
+        // Register an event handler to clean up styles when the transition
+        // finishes.
+        el.addEventListener("transitionend", function (event) {
+          if (event.propertyName === "transform") {
+            el.style[vendorPrefix + 'Transform'] = '';
+            el.style[vendorPrefix + 'TransitionDuration'] = '';
+          }
+        }, {
+          once: true
+        });
+      }
+
+      _this2.lastSortEndEventParams = null;
+    });
+  },
+  beforeDestroy: function beforeDestroy() {
+    var _this3 = this;
+
     var _loop2 = function _loop2(key) {
-      if (_this2.events.hasOwnProperty(key)) {
+      if (_this3.events.hasOwnProperty(key)) {
         events[key].forEach(function (eventName) {
-          return _this2.container.removeEventListener(eventName, _this2.events[key]);
+          return _this3.container.removeEventListener(eventName, _this3.events[key]);
         });
       }
     };
@@ -408,7 +456,7 @@ var ContainerMixin = {
 
   methods: {
     handleStart: function handleStart(e) {
-      var _this3 = this;
+      var _this4 = this;
 
       var _$props = this.$props,
           distance = _$props.distance,
@@ -456,7 +504,7 @@ var ContainerMixin = {
             this.handlePress(e);
           } else {
             this.pressTimer = setTimeout(function () {
-              return _this3.handlePress(e);
+              return _this4.handlePress(e);
             }, this.$props.pressDelay);
           }
         }
@@ -503,7 +551,7 @@ var ContainerMixin = {
       }
     },
     handlePress: function handlePress(e) {
-      var _this4 = this;
+      var _this5 = this;
 
       var active = this.manager.getActive();
 
@@ -562,7 +610,11 @@ var ContainerMixin = {
           }
         });
 
-        this.helper = this.document.body.appendChild(clonedNode);
+        if (this.appendHelperToContainer === true) {
+          this.helper = this.container.appendChild(clonedNode);
+        } else {
+          this.helper = this.document.body.appendChild(clonedNode);
+        }
 
         this.helper.style.position = 'fixed';
         this.helper.style.top = this.boundingClientRect.top - margin.top + 'px';
@@ -597,10 +649,10 @@ var ContainerMixin = {
 
         this.listenerNode = e.touches ? node : this._window;
         events.move.forEach(function (eventName) {
-          return _this4.listenerNode.addEventListener(eventName, _this4.handleSortMove, false);
+          return _this5.listenerNode.addEventListener(eventName, _this5.handleSortMove, false);
         });
         events.end.forEach(function (eventName) {
-          return _this4.listenerNode.addEventListener(eventName, _this4.handleSortEnd, false);
+          return _this5.listenerNode.addEventListener(eventName, _this5.handleSortEnd, false);
         });
 
         this.sorting = true;
@@ -619,7 +671,7 @@ var ContainerMixin = {
       this.$emit('sort-move', { event: e });
     },
     handleSortEnd: function handleSortEnd(e) {
-      var _this5 = this;
+      var _this6 = this;
 
       var collection = this.manager.active.collection;
 
@@ -627,15 +679,12 @@ var ContainerMixin = {
 
       if (this.listenerNode) {
         events.move.forEach(function (eventName) {
-          return _this5.listenerNode.removeEventListener(eventName, _this5.handleSortMove);
+          return _this6.listenerNode.removeEventListener(eventName, _this6.handleSortMove);
         });
         events.end.forEach(function (eventName) {
-          return _this5.listenerNode.removeEventListener(eventName, _this5.handleSortEnd);
+          return _this6.listenerNode.removeEventListener(eventName, _this6.handleSortEnd);
         });
       }
-
-      // Remove the helper from the DOM
-      this.helper.parentNode.removeChild(this.helper);
 
       if (this.hideSortableGhost && this.sortableGhost) {
         this.sortableGhost.style.visibility = '';
@@ -655,6 +704,17 @@ var ContainerMixin = {
         el.style[vendorPrefix + 'TransitionDuration'] = '';
       }
 
+      // Calculate the offset of the dropped item from its target position
+      var helperRect = this.helper.getBoundingClientRect();
+      var newIndexNodeRect = nodes[this.newIndex].node.getBoundingClientRect();
+      var translate = {
+        x: this.newIndex > this.index ? helperRect.right - newIndexNodeRect.right : helperRect.left - newIndexNodeRect.left,
+        y: this.newIndex > this.index ? helperRect.bottom - newIndexNodeRect.bottom : helperRect.top - newIndexNodeRect.top
+      };
+
+      // Remove the helper from the DOM
+      this.helper.parentNode.removeChild(this.helper);
+
       // Stop autoscroll
       clearInterval(this.autoscrollInterval);
       this.autoscrollInterval = null;
@@ -665,12 +725,15 @@ var ContainerMixin = {
       this.sorting = false;
       this.sortingIndex = null;
 
-      this.$emit('sort-end', {
+      this.lastSortEndEventParams = {
         event: e,
         oldIndex: this.index,
         newIndex: this.newIndex,
-        collection: collection
-      });
+        collection: collection,
+        translate: translate
+      };
+
+      this.$emit('sort-end', this.lastSortEndEventParams);
       this.$emit('input', arrayMove(this.value, this.index, this.newIndex));
 
       this._touched = false;
@@ -922,7 +985,7 @@ var ContainerMixin = {
       }
     },
     autoscroll: function autoscroll() {
-      var _this6 = this;
+      var _this7 = this;
 
       var translate = this.translate;
       var direction = {
@@ -960,16 +1023,16 @@ var ContainerMixin = {
 
       if (direction.x !== 0 || direction.y !== 0) {
         this.autoscrollInterval = setInterval(function () {
-          _this6.isAutoScrolling = true;
+          _this7.isAutoScrolling = true;
           var offset = {
             left: 1 * speed.x * direction.x,
             top: 1 * speed.y * direction.y
           };
-          _this6.scrollContainer.scrollTop += offset.top;
-          _this6.scrollContainer.scrollLeft += offset.left;
-          _this6.translate.x += offset.left;
-          _this6.translate.y += offset.top;
-          _this6.animateNodes();
+          _this7.scrollContainer.scrollTop += offset.top;
+          _this7.scrollContainer.scrollLeft += offset.left;
+          _this7.translate.x += offset.left;
+          _this7.translate.y += offset.top;
+          _this7.animateNodes();
         }, 5);
       }
     }
