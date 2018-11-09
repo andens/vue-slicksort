@@ -390,7 +390,10 @@ export const ContainerMixin = {
     },
 
     transitionHelperIntoPlace(nodes) {
-      if (this.$props.draggedSettlingDuration === 0) {
+      // Immediately resolve if the settling duration is instant (no transition
+      // takes place) or no translation has been set. The latter happens if the
+      // very first interaction with any item is a dragless click.
+      if (this.$props.draggedSettlingDuration === 0 || !this.translate) {
         return Promise.resolve();
       }
 
