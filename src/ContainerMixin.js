@@ -430,19 +430,11 @@ export const ContainerMixin = {
       ] = `${duration}ms`;
 
       return new Promise(resolve => {
-        // Register an event handler to clean up styles when the transition
-        // finishes.
-        const cleanup = event => {
-          if (!event || event.propertyName === 'transform') {
-            clearTimeout(cleanupTimer);
-            this.helper.style[`${vendorPrefix}Transform`] = '';
-            this.helper.style[`${vendorPrefix}TransitionDuration`] = '';
-            resolve();
-          }
-        };
-        // Force cleanup in case 'transitionend' never fires
-        const cleanupTimer = setTimeout(cleanup, duration + 10);
-        this.helper.addEventListener('transitionend', cleanup, false);
+        setTimeout(() => {
+          this.helper.style[`${vendorPrefix}Transform`] = '';
+          this.helper.style[`${vendorPrefix}TransitionDuration`] = '';
+          resolve();
+        }, duration);
       });
     },
 
